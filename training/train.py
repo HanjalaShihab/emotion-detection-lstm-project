@@ -10,6 +10,7 @@ Run:
 
 import re
 import pickle
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
@@ -17,7 +18,7 @@ from sklearn.preprocessing import LabelEncoder
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Embedding, LSTM, Dense
+from tensorflow.keras.layers import Embedding, LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
 
 # Configuration
@@ -26,7 +27,7 @@ VOCAB_SIZE = 10000
 MAX_LEN = 40
 EMBED_DIM = 64
 LSTM_UNITS = 64
-EPOCHS = 10
+EPOCHS = 15
 BATCH_SIZE = 64
 
 # Load dataset
@@ -42,7 +43,7 @@ print(f"Total samples: {len(df)}")
 print("\nEmotion distribution:")
 print(df["emotion"].value_counts())
 
-# Get all classes automatically
+# Get all classes
 CLASS_NAMES = sorted(df["emotion"].unique())
 print(f"\nTotal classes: {len(CLASS_NAMES)}")
 print("Classes:", CLASS_NAMES)
@@ -72,39 +73,81 @@ for i, label in enumerate(label_encoder.classes_):
 
 # Train/test split
 X_train_text, X_test_text, y_train, y_test = train_test_split(
-    df["clean_text"], y, test_size=0.2, random_state=42, stratify=y
+    df["clean_text"],
+    y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
 )
+
 print(f"\nTraining samples: {len(X_train_text)}")
 print(f"Testing samples: {len(X_test_text)}")
 
 # Tokenization
 print("\nTokenizing text...")
-tokenizer = Tokenizer(num_words=VOCAB_SIZE, oov_token="<OOV>")
+tokenizer = Tokenizer(
+    num_words=VOCAB_SIZE,
+    oov_token="<OOV>"
+)
 tokenizer.fit_on_texts(X_train_text)
+
 X_train_seq = tokenizer.texts_to_sequences(X_train_text)
 X_test_seq = tokenizer.texts_to_sequences(X_test_text)
 
 # Padding
-X_train_pad = pad_sequences(X_train_seq, maxlen=MAX_LEN, padding="post", truncating="post")
-X_test_pad = pad_sequences(X_test_seq, maxlen=MAX_LEN, padding="post", truncating="post")
+X_train_pad = pad_sequences(
+    X_train_seq,
+    maxlen=MAX_LEN,
+    padding="post",
+    truncating="post"
+)
+
+X_test_pad = pad_sequences(
+    X_test_seq,
+    maxlen=MAX_LEN,
+    padding="post",
+    truncating="post"
+)
+
 print(f"Training input shape: {X_train_pad.shape}")
 print(f"Testing input shape: {X_test_pad.shape}")
 
 # Build LSTM model
 print("\nBuilding LSTM model...")
-vocab_size = min(VOCAB_SIZE, len(tokenizer.word_index) + 1)
+
+vocab_size = min(
+    VOCAB_SIZE,
+    len(tokenizer.word_index) + 1
+)
+
 model = Sequential([
-    Embedding(input_dim=vocab_size, output_dim=EMBED_DIM),
+    Embedding(
+        input_dim=vocab_size,
+        output_dim=EMBED_DIM
+    ),
     LSTM(LSTM_UNITS),
+    Dropout(0.3),
     Dense(32, activation="relu"),
     Dense(NUM_CLASSES, activation="softmax")
 ])
-model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+
+model.compile(
+    optimizer="adam",
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy"]
+)
+
 model.summary()
 
 # Train model
-early_stop = EarlyStopping(monitor="val_loss", patience=2, restore_best_weights=True)
+early_stop = EarlyStopping(
+    monitor="val_loss",
+    patience=3,
+    restore_best_weights=True
+)
+
 print("\nStarting training...")
+
 history = model.fit(
     X_train_pad,
     y_train,
@@ -114,9 +157,14 @@ history = model.fit(
     callbacks=[early_stop]
 )
 
-# Evaluate model
+# Evaluate
 print("\nEvaluating model...")
-loss, accuracy = model.evaluate(X_test_pad, y_test)
+
+loss, accuracy = model.evaluate(
+    X_test_pad,
+    y_test
+)
+
 print("\n==============================")
 print("MODEL RESULTS")
 print("==============================")
@@ -125,6 +173,7 @@ print(f"Test Accuracy: {accuracy:.4f}")
 
 # Save training graph
 plt.figure(figsize=(10, 4))
+
 plt.subplot(1, 2, 1)
 plt.plot(history.history["accuracy"], label="Training")
 plt.plot(history.history["val_accuracy"], label="Validation")
@@ -144,6 +193,7 @@ plt.legend()
 plt.tight_layout()
 plt.savefig("training_history.png")
 plt.close()
+
 print("\nSaved training graph: training_history.png")
 
 # Save model

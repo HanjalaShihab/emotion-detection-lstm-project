@@ -1,12 +1,8 @@
 """
-Train an LSTM model for 6-class text emotion classification.
+Train an LSTM model for text emotion/sentiment classification.
 
-Classes: joy, sadness, anger, fear, love, surprise
-
-Expects a CSV file at training/emotion.csv with two columns:
-    text,emotion
-
-See training/README.md for where to get this dataset.
+Dataset columns:
+    tweet_id, sentiment, content
 
 Run:
     python train.py
@@ -14,23 +10,17 @@ Run:
 
 import re
 import pickle
-
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Embedding, LSTM, Dense
 from tensorflow.keras.callbacks import EarlyStopping
 
-# -----------------------------
-# 1. Config
-# -----------------------------
+# Configuration
 CSV_PATH = "emotion.csv"
 VOCAB_SIZE = 10000
 MAX_LEN = 40
@@ -39,139 +29,139 @@ LSTM_UNITS = 64
 EPOCHS = 10
 BATCH_SIZE = 64
 
-CLASS_NAMES = ["joy", "sadness", "anger", "fear", "love", "surprise"]
-
-# -----------------------------
-# 2. Load dataset
-# -----------------------------
+# Load dataset
 print("Loading dataset...")
 df = pd.read_csv(CSV_PATH)
-df = df.dropna(subset=["text", "emotion"])
-
-# Keep only the six emotions we care about
-df["emotion"] = df["emotion"].str.lower().str.strip()
-df = df[df["emotion"].isin(CLASS_NAMES)].reset_index(drop=True)
+df = df.rename(columns={"content": "text", "sentiment": "emotion"})
+df = df.dropna(subset=["text", "emotion"]).reset_index(drop=True)
+df["emotion"] = df["emotion"].astype(str).str.lower().str.strip()
+df["text"] = df["text"].astype(str)
+df = df[df["text"].str.strip() != ""].reset_index(drop=True)
 
 print(f"Total samples: {len(df)}")
+print("\nEmotion distribution:")
 print(df["emotion"].value_counts())
 
+# Get all classes automatically
+CLASS_NAMES = sorted(df["emotion"].unique())
+print(f"\nTotal classes: {len(CLASS_NAMES)}")
+print("Classes:", CLASS_NAMES)
 
-# -----------------------------
-# 3. Clean text
-# -----------------------------
-def clean_text(text: str) -> str:
+# Clean text
+def clean_text(text):
     text = str(text).lower()
-    text = re.sub(r"http\S+|www\S+", " ", text)      # remove urls
-    text = re.sub(r"[^a-z\s]", " ", text)             # keep letters only
-    text = re.sub(r"\s+", " ", text).strip()          # collapse whitespace
+    text = re.sub(r"http\S+|www\S+", " ", text)
+    text = re.sub(r"@\w+", " ", text)
+    text = re.sub(r"#", "", text)
+    text = re.sub(r"[^a-z\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
     return text
 
-
+print("\nCleaning text...")
 df["clean_text"] = df["text"].apply(clean_text)
+df = df[df["clean_text"].str.strip() != ""].reset_index(drop=True)
 
-# -----------------------------
-# 4. Encode labels
-# -----------------------------
+# Encode labels
 label_encoder = LabelEncoder()
-label_encoder.fit(CLASS_NAMES)  # fixes label order to CLASS_NAMES
-y = label_encoder.transform(df["emotion"])
+y = label_encoder.fit_transform(df["emotion"])
+NUM_CLASSES = len(label_encoder.classes_)
 
-# -----------------------------
-# 5. Train / test split
-# -----------------------------
+print("\nEncoded classes:")
+for i, label in enumerate(label_encoder.classes_):
+    print(f"{i}: {label}")
+
+# Train/test split
 X_train_text, X_test_text, y_train, y_test = train_test_split(
     df["clean_text"], y, test_size=0.2, random_state=42, stratify=y
 )
+print(f"\nTraining samples: {len(X_train_text)}")
+print(f"Testing samples: {len(X_test_text)}")
 
-# -----------------------------
-# 6. Tokenize
-# -----------------------------
+# Tokenization
+print("\nTokenizing text...")
 tokenizer = Tokenizer(num_words=VOCAB_SIZE, oov_token="<OOV>")
 tokenizer.fit_on_texts(X_train_text)
-
 X_train_seq = tokenizer.texts_to_sequences(X_train_text)
 X_test_seq = tokenizer.texts_to_sequences(X_test_text)
 
-# -----------------------------
-# 7. Pad sequences
-# -----------------------------
+# Padding
 X_train_pad = pad_sequences(X_train_seq, maxlen=MAX_LEN, padding="post", truncating="post")
 X_test_pad = pad_sequences(X_test_seq, maxlen=MAX_LEN, padding="post", truncating="post")
+print(f"Training input shape: {X_train_pad.shape}")
+print(f"Testing input shape: {X_test_pad.shape}")
 
-# -----------------------------
-# 8. Build LSTM model
-# -----------------------------
+# Build LSTM model
+print("\nBuilding LSTM model...")
 vocab_size = min(VOCAB_SIZE, len(tokenizer.word_index) + 1)
-
 model = Sequential([
-    Embedding(vocab_size, EMBED_DIM, input_length=MAX_LEN, mask_zero=True),
+    Embedding(input_dim=vocab_size, output_dim=EMBED_DIM),
     LSTM(LSTM_UNITS),
     Dense(32, activation="relu"),
-    Dense(len(CLASS_NAMES), activation="softmax"),
+    Dense(NUM_CLASSES, activation="softmax")
 ])
-
-model.compile(
-    optimizer="adam",
-    loss="sparse_categorical_crossentropy",
-    metrics=["accuracy"],
-)
-
+model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
 model.summary()
 
-# -----------------------------
-# 9. Train
-# -----------------------------
+# Train model
 early_stop = EarlyStopping(monitor="val_loss", patience=2, restore_best_weights=True)
-
+print("\nStarting training...")
 history = model.fit(
     X_train_pad,
     y_train,
     validation_data=(X_test_pad, y_test),
     epochs=EPOCHS,
     batch_size=BATCH_SIZE,
-    callbacks=[early_stop],
+    callbacks=[early_stop]
 )
 
-# -----------------------------
-# 10. Evaluate
-# -----------------------------
+# Evaluate model
+print("\nEvaluating model...")
 loss, accuracy = model.evaluate(X_test_pad, y_test)
-print(f"\nTest Loss: {loss:.4f}")
+print("\n==============================")
+print("MODEL RESULTS")
+print("==============================")
+print(f"Test Loss: {loss:.4f}")
 print(f"Test Accuracy: {accuracy:.4f}")
 
-# Plot accuracy / loss curves
+# Save training graph
 plt.figure(figsize=(10, 4))
-
 plt.subplot(1, 2, 1)
-plt.plot(history.history["accuracy"], label="train")
-plt.plot(history.history["val_accuracy"], label="val")
-plt.title("Accuracy")
+plt.plot(history.history["accuracy"], label="Training")
+plt.plot(history.history["val_accuracy"], label="Validation")
+plt.title("Training and Validation Accuracy")
 plt.xlabel("Epoch")
+plt.ylabel("Accuracy")
 plt.legend()
 
 plt.subplot(1, 2, 2)
-plt.plot(history.history["loss"], label="train")
-plt.plot(history.history["val_loss"], label="val")
-plt.title("Loss")
+plt.plot(history.history["loss"], label="Training")
+plt.plot(history.history["val_loss"], label="Validation")
+plt.title("Training and Validation Loss")
 plt.xlabel("Epoch")
+plt.ylabel("Loss")
 plt.legend()
 
 plt.tight_layout()
 plt.savefig("training_history.png")
-print("Saved training curves to training_history.png")
+plt.close()
+print("\nSaved training graph: training_history.png")
 
-# -----------------------------
-# 11. Save model, tokenizer, label classes
-# -----------------------------
+# Save model
 model.save("../backend/emotion_model.keras")
 
+# Save tokenizer
 with open("../backend/tokenizer.pkl", "wb") as f:
     pickle.dump(tokenizer, f)
 
+# Save label classes
 with open("../backend/label_classes.pkl", "wb") as f:
     pickle.dump(list(label_encoder.classes_), f)
 
-print("\nSaved:")
-print("  ../backend/emotion_model.keras")
-print("  ../backend/tokenizer.pkl")
-print("  ../backend/label_classes.pkl")
+print("\n==============================")
+print("TRAINING COMPLETED")
+print("==============================")
+print("\nSaved files:")
+print("../backend/emotion_model.keras")
+print("../backend/tokenizer.pkl")
+print("../backend/label_classes.pkl")
+print("training_history.png")

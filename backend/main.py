@@ -8,13 +8,15 @@ Run:
     uvicorn main:app --reload
 """
 
+import io
 import re
 import pickle
 
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from PIL import Image
 
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.sequence import pad_sequences
@@ -42,6 +44,27 @@ with open("tokenizer.pkl", "rb") as f:
 
 with open("label_classes.pkl", "rb") as f:
     class_names = pickle.load(f)  # order matches model output index
+
+# Image model is optional — don't crash the whole backend if it hasn't
+# been trained yet (run training/train_image.py to create these files).
+IMG_SIZE = (48, 48)
+IMAGE_EMOJI = {
+    "angry": "😠",
+    "disgusted": "🤢",
+    "fearful": "😨",
+    "happy": "😊",
+    "neutral": "😐",
+    "sad": "😢",
+    "surprised": "😲",
+}
+
+try:
+    image_model = load_model("emotion_image_model.keras")
+    with open("image_labels.pkl", "rb") as f:
+        image_class_names = pickle.load(f)
+except (IOError, OSError):
+    image_model = None
+    image_class_names = None
 
 # -----------------------------
 # App setup
@@ -94,6 +117,35 @@ def predict(input_data: TextInput):
     return {
         "emotion": predicted_emotion,
         "emoji": EMOJI_MAP.get(predicted_emotion, ""),
+        "confidence": confidence,
+        "probabilities": all_probabilities,
+    }
+
+
+@app.post("/predict-image")
+async def predict_image(file: UploadFile = File(...)):
+    if image_model is None:
+        return {"error": "Image model not trained yet. Run training/train_image.py first."}
+
+    contents = await file.read()
+    image = Image.open(io.BytesIO(contents)).convert("L").resize(IMG_SIZE)
+
+    array = np.array(image, dtype="float32") / 255.0
+    array = array.reshape(1, IMG_SIZE[0], IMG_SIZE[1], 1)
+
+    probabilities = image_model.predict(array, verbose=0)[0]
+
+    predicted_index = int(np.argmax(probabilities))
+    predicted_emotion = image_class_names[predicted_index]
+    confidence = float(probabilities[predicted_index])
+
+    all_probabilities = {
+        image_class_names[i]: float(probabilities[i]) for i in range(len(image_class_names))
+    }
+
+    return {
+        "emotion": predicted_emotion,
+        "emoji": IMAGE_EMOJI.get(predicted_emotion, ""),
         "confidence": confidence,
         "probabilities": all_probabilities,
     }

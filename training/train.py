@@ -104,7 +104,7 @@ X_test_pad = pad_sequences(X_test_seq, maxlen=MAX_LEN, padding="post", truncatin
 vocab_size = min(VOCAB_SIZE, len(tokenizer.word_index) + 1)
 
 model = Sequential([
-    Embedding(vocab_size, EMBED_DIM, input_length=MAX_LEN),
+    Embedding(vocab_size, EMBED_DIM, input_length=MAX_LEN, mask_zero=True),
     LSTM(LSTM_UNITS),
     Dense(32, activation="relu"),
     Dense(len(CLASS_NAMES), activation="softmax"),

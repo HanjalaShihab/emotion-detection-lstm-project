@@ -18,6 +18,26 @@ const EMOTION_EMOJI = {
   surprise: "😲",
 };
 
+const IMAGE_EMOTION_COLORS = {
+  angry: "#E63946",
+  disgusted: "#6A994E",
+  fearful: "#9D4EDD",
+  happy: "#FFD166",
+  neutral: "#94A3B8",
+  sad: "#4C6EF5",
+  surprised: "#06D6A0",
+};
+
+const IMAGE_EMOTION_EMOJI = {
+  angry: "😠",
+  disgusted: "🤢",
+  fearful: "😨",
+  happy: "😊",
+  neutral: "😐",
+  sad: "😢",
+  surprised: "😲",
+};
+
 function ChainLoader() {
   // Small signature animation: tokens flowing through LSTM "cells"
   return (
@@ -41,8 +61,8 @@ function ChainLoader() {
   );
 }
 
-function ProbabilityBar({ label, value }) {
-  const color = EMOTION_COLORS[label] ?? "#888";
+function ProbabilityBar({ label, value, colors = EMOTION_COLORS }) {
+  const color = colors[label] ?? "#888";
   const pct = Math.round(value * 100);
   return (
     <div className="mb-2">
@@ -96,6 +116,54 @@ export default function App() {
   };
 
   const accentColor = result ? EMOTION_COLORS[result.emotion] : "#3fb950";
+
+  // --- Image emotion detection ---
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [imageResult, setImageResult] = useState(null);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageError, setImageError] = useState("");
+
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+    setImageResult(null);
+    setImageError("");
+  };
+
+  const analyzeImage = async () => {
+    if (!imageFile) return;
+
+    setImageLoading(true);
+    setImageError("");
+    setImageResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", imageFile);
+
+      const response = await fetch("http://localhost:8000/predict-image", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error("Backend request failed");
+
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      setImageResult(data);
+    } catch (err) {
+      setImageError(err.message || "Could not analyze the image.");
+    } finally {
+      setImageLoading(false);
+    }
+  };
+
+  const imageAccentColor = imageResult
+    ? IMAGE_EMOTION_COLORS[imageResult.emotion]
+    : "#3fb950";
 
   return (
     <div className="min-h-screen w-full px-4 py-10 text-slate-100">
@@ -167,8 +235,81 @@ export default function App() {
           )}
         </div>
 
+        {/* Image emotion detection card */}
+        <div className="mt-8 rounded-2xl border border-slate-800 bg-[#161b22] p-6 shadow-xl">
+          <h2 className="mb-1 text-center font-display text-lg font-bold text-white">
+            Image Emotion Detection
+          </h2>
+          <p className="mb-4 text-center font-body text-xs text-slate-400">
+            CNN-based facial emotion classification
+          </p>
+
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleImageChange}
+            className="block w-full text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-700 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-100 hover:file:bg-slate-600"
+          />
+
+          {imagePreview && (
+            <img
+              src={imagePreview}
+              alt="preview"
+              className="mx-auto mt-4 h-32 w-32 rounded-lg border border-slate-700 object-cover"
+            />
+          )}
+
+          <button
+            onClick={analyzeImage}
+            disabled={imageLoading || !imageFile}
+            className="mt-4 w-full rounded-lg bg-emerald-500 py-3 font-display font-semibold text-slate-900 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {imageLoading ? "Analyzing..." : "Analyze Image"}
+          </button>
+
+          {imageLoading && <ChainLoader />}
+
+          {imageError && (
+            <p className="mt-4 text-center text-sm text-red-400">{imageError}</p>
+          )}
+
+          {imageResult && !imageLoading && (
+            <div className="mt-6 border-t border-slate-800 pt-6">
+              <p className="text-center font-body text-xs uppercase tracking-widest text-slate-500">
+                Predicted Emotion
+              </p>
+
+              <div
+                className="my-3 text-center font-display text-2xl font-bold uppercase"
+                style={{ color: imageAccentColor }}
+              >
+                {IMAGE_EMOTION_EMOJI[imageResult.emotion]} {imageResult.emotion}
+              </div>
+
+              <p className="mb-4 text-center text-sm text-slate-400">
+                Confidence: {Math.round(imageResult.confidence * 100)}%
+              </p>
+
+              {imageResult.probabilities && (
+                <div className="mt-4">
+                  {Object.entries(imageResult.probabilities)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([label, value]) => (
+                      <ProbabilityBar
+                        key={label}
+                        label={label}
+                        value={value}
+                        colors={IMAGE_EMOTION_COLORS}
+                      />
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <p className="mt-6 text-center font-body text-xs text-slate-600">
-          Backend: FastAPI · Model: LSTM · Frontend: React + Vite
+          Backend: FastAPI · Text model: LSTM · Image model: CNN · Frontend: React + Vite
         </p>
       </div>
     </div>

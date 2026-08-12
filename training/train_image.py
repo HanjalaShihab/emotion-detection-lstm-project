@@ -1,226 +1,167 @@
-"""
-Train a CNN model for facial emotion detection from images.
-
-Classes are automatically loaded from folder names.
-
-Expected structure:
-    image_emotion/
-        train/
-            angry/
-            disgusted/
-            fearful/
-            happy/
-            neutral/
-            sad/
-            surprised/
-        test/
-            angry/
-            disgusted/
-            fearful/
-            happy/
-            neutral/
-            sad/
-            surprised/
-
-Run:
-    python train_image.py
-"""
-
+import os
 import pickle
-import numpy as np
 import tensorflow as tf
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, BatchNormalization, Activation, Dropout, Flatten, Dense
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
-from tensorflow.keras import layers, models
-from sklearn.utils.class_weight import compute_class_weight
+DATASET_DIR = "image_emotion"
+TRAIN_DIR = os.path.join(DATASET_DIR, "train")
+TEST_DIR = os.path.join(DATASET_DIR, "test")
 
-# Configuration
-DATA_DIR = "image_emotion"
-IMG_SIZE = (48, 48)
-BATCH_SIZE = 64
-EPOCHS = 30
+IMG_SIZE = 48
+BATCH_SIZE = 128
+EPOCHS = 15
 SEED = 42
 
-# Load training images
-print("Loading training images...")
+print("Loading image dataset...")
 
-train_ds = tf.keras.utils.image_dataset_from_directory(
-    f"{DATA_DIR}/train",
-    image_size=IMG_SIZE,
+train_datagen = ImageDataGenerator(
+    rescale=1.0 / 255,
+    rotation_range=10,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    zoom_range=0.1,
+    horizontal_flip=True,
+    validation_split=0.15
+)
+
+test_datagen = ImageDataGenerator(
+    rescale=1.0 / 255
+)
+
+train_generator = train_datagen.flow_from_directory(
+    TRAIN_DIR,
+    target_size=(IMG_SIZE, IMG_SIZE),
     color_mode="grayscale",
     batch_size=BATCH_SIZE,
+    class_mode="categorical",
+    subset="training",
     shuffle=True,
     seed=SEED
 )
 
-# Load test images
-print("\nLoading test images...")
-
-test_ds = tf.keras.utils.image_dataset_from_directory(
-    f"{DATA_DIR}/test",
-    image_size=IMG_SIZE,
+validation_generator = train_datagen.flow_from_directory(
+    TRAIN_DIR,
+    target_size=(IMG_SIZE, IMG_SIZE),
     color_mode="grayscale",
     batch_size=BATCH_SIZE,
+    class_mode="categorical",
+    subset="validation",
+    shuffle=False,
+    seed=SEED
+)
+
+test_generator = test_datagen.flow_from_directory(
+    TEST_DIR,
+    target_size=(IMG_SIZE, IMG_SIZE),
+    color_mode="grayscale",
+    batch_size=BATCH_SIZE,
+    class_mode="categorical",
     shuffle=False
 )
 
-class_names = train_ds.class_names
-NUM_CLASSES = len(class_names)
+class_names = list(train_generator.class_indices.keys())
+num_classes = len(class_names)
 
-print("\nClasses:")
-for i, name in enumerate(class_names):
-    print(f"{i}: {name}")
+print("Classes:", class_names)
+print("Number of classes:", num_classes)
+print("Training images:", train_generator.samples)
+print("Validation images:", validation_generator.samples)
+print("Testing images:", test_generator.samples)
 
-print(f"\nTotal classes: {NUM_CLASSES}")
+print("Building CNN model...")
 
-# Count training samples
-class_counts = np.zeros(NUM_CLASSES, dtype=np.int64)
+model = Sequential([
+    Input(shape=(IMG_SIZE, IMG_SIZE, 1)),
 
-for _, labels in train_ds:
-    for label in labels.numpy():
-        class_counts[label] += 1
+    Conv2D(64, (3, 3), padding="same"),
+    BatchNormalization(),
+    Activation("relu"),
+    MaxPooling2D(pool_size=(2, 2)),
+    Dropout(0.25),
 
-print("\nTraining image distribution:")
-for i, name in enumerate(class_names):
-    print(f"{name}: {class_counts[i]}")
+    Conv2D(128, (5, 5), padding="same"),
+    BatchNormalization(),
+    Activation("relu"),
+    MaxPooling2D(pool_size=(2, 2)),
+    Dropout(0.25),
 
-# Calculate class weights
-labels_for_weights = []
+    Conv2D(256, (3, 3), padding="same"),
+    BatchNormalization(),
+    Activation("relu"),
+    MaxPooling2D(pool_size=(2, 2)),
+    Dropout(0.25),
 
-for _, labels in train_ds:
-    labels_for_weights.extend(labels.numpy())
+    Conv2D(256, (3, 3), padding="same"),
+    BatchNormalization(),
+    Activation("relu"),
+    MaxPooling2D(pool_size=(2, 2)),
+    Dropout(0.25),
 
-labels_for_weights = np.array(labels_for_weights)
+    Flatten(),
 
-classes = np.unique(labels_for_weights)
+    Dense(256),
+    BatchNormalization(),
+    Activation("relu"),
+    Dropout(0.4),
 
-weights = compute_class_weight(
-    class_weight="balanced",
-    classes=classes,
-    y=labels_for_weights
-)
+    Dense(128),
+    BatchNormalization(),
+    Activation("relu"),
+    Dropout(0.3),
 
-class_weights = dict(zip(classes, weights))
-
-print("\nClass weights:")
-for class_id, weight in class_weights.items():
-    print(f"{class_names[class_id]}: {weight:.2f}")
-
-# Data augmentation
-data_augmentation = tf.keras.Sequential([
-    layers.RandomFlip("horizontal"),
-    layers.RandomRotation(0.08),
-    layers.RandomZoom(0.10),
-    layers.RandomTranslation(0.05, 0.05)
-], name="data_augmentation")
-
-# Normalize images
-normalization = layers.Rescaling(1.0 / 255)
-
-# Improve input pipeline
-AUTOTUNE = tf.data.AUTOTUNE
-
-train_ds = train_ds.prefetch(AUTOTUNE)
-test_ds = test_ds.prefetch(AUTOTUNE)
-
-# Build CNN
-print("\nBuilding CNN model...")
-
-model = models.Sequential([
-    layers.Input(shape=(IMG_SIZE[0], IMG_SIZE[1], 1)),
-
-    normalization,
-    data_augmentation,
-
-    layers.Conv2D(32, (3, 3), padding="same", activation="relu"),
-    layers.BatchNormalization(),
-    layers.Conv2D(32, (3, 3), padding="same", activation="relu"),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D((2, 2)),
-    layers.Dropout(0.25),
-
-    layers.Conv2D(64, (3, 3), padding="same", activation="relu"),
-    layers.BatchNormalization(),
-    layers.Conv2D(64, (3, 3), padding="same", activation="relu"),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D((2, 2)),
-    layers.Dropout(0.25),
-
-    layers.Conv2D(128, (3, 3), padding="same", activation="relu"),
-    layers.BatchNormalization(),
-    layers.Conv2D(128, (3, 3), padding="same", activation="relu"),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D((2, 2)),
-    layers.Dropout(0.30),
-
-    layers.GlobalAveragePooling2D(),
-
-    layers.Dense(128, activation="relu"),
-    layers.BatchNormalization(),
-    layers.Dropout(0.40),
-
-    layers.Dense(NUM_CLASSES, activation="softmax")
+    Dense(num_classes, activation="softmax")
 ])
 
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-    loss="sparse_categorical_crossentropy",
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.0005),
+    loss="categorical_crossentropy",
     metrics=["accuracy"]
 )
 
-model.build(input_shape=(None, IMG_SIZE[0], IMG_SIZE[1], 1))
-
 model.summary()
 
-# Callbacks
-early_stop = tf.keras.callbacks.EarlyStopping(
+early_stopping = EarlyStopping(
     monitor="val_loss",
-    patience=5,
+    patience=3,
     restore_best_weights=True,
     verbose=1
 )
 
-reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
+reduce_lr = ReduceLROnPlateau(
     monitor="val_loss",
     factor=0.5,
     patience=2,
-    min_lr=0.00001,
+    min_lr=1e-6,
     verbose=1
 )
 
-# Train
-print("\nStarting CNN training...")
+print("Starting CNN training...")
 
-history = model.fit(
-    train_ds,
-    validation_data=test_ds,
+model.fit(
+    train_generator,
+    validation_data=validation_generator,
     epochs=EPOCHS,
-    class_weight=class_weights,
-    callbacks=[early_stop, reduce_lr],
-    verbose=1
+    callbacks=[early_stopping, reduce_lr]
 )
 
-# Evaluate
-print("\nEvaluating CNN...")
+print("Evaluating model...")
 
-loss, accuracy = model.evaluate(test_ds, verbose=1)
+test_loss, test_accuracy = model.evaluate(test_generator)
 
-print("\n==============================")
-print("CNN MODEL RESULTS")
-print("==============================")
-print(f"Test Loss: {loss:.4f}")
-print(f"Test Accuracy: {accuracy:.4f}")
+print(f"Test Loss: {test_loss:.4f}")
+print(f"Test Accuracy: {test_accuracy:.4f}")
 
-# Save model
-model.save("../backend/emotion_image_model.keras")
+os.makedirs("../backend", exist_ok=True)
 
-# Save labels
-with open("../backend/image_labels.pkl", "wb") as f:
+model.save("../backend/image_emotion_model.keras")
+
+with open("../backend/image_label_classes.pkl", "wb") as f:
     pickle.dump(class_names, f)
 
-print("\n==============================")
-print("CNN TRAINING COMPLETED")
-print("==============================")
-
-print("\nSaved:")
-print("../backend/emotion_image_model.keras")
-print("../backend/image_labels.pkl")
+print("Training completed.")
+print("Saved:")
+print("../backend/image_emotion_model.keras")
+print("../backend/image_label_classes.pkl")

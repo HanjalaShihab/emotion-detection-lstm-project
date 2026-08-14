@@ -1,13 +1,3 @@
-"""
-Train an LSTM model for 13-class text emotion classification.
-
-Dataset columns:
-    tweet_id, sentiment, content
-
-Run:
-    python train.py
-"""
-
 import re
 import pickle
 import numpy as np

@@ -164,4 +164,4 @@ with open("../backend/image_label_classes.pkl", "wb") as f:
 print("Training completed.")
 print("Saved:")
 print("../backend/image_emotion_model.keras")
-print("../backend/image_label_classes.pkl")
+print("../backend/image_label_classes.pkl")+.96

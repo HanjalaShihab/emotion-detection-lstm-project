@@ -6,8 +6,9 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, BatchNormalization, Activation, Dropout, Flatten, Dense
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
-DATASET_DIR = "image_emotion"
+DATASET_DIR = "emotion detection dataset main"
 TRAIN_DIR = os.path.join(DATASET_DIR, "train")
+VALIDATION_DIR = os.path.join(DATASET_DIR, "validation")
 TEST_DIR = os.path.join(DATASET_DIR, "test")
 
 IMG_SIZE = 48
@@ -23,8 +24,11 @@ train_datagen = ImageDataGenerator(
     width_shift_range=0.1,
     height_shift_range=0.1,
     zoom_range=0.1,
-    horizontal_flip=True,
-    validation_split=0.15
+    horizontal_flip=True
+)
+
+validation_datagen = ImageDataGenerator(
+    rescale=1.0 / 255
 )
 
 test_datagen = ImageDataGenerator(
@@ -37,20 +41,17 @@ train_generator = train_datagen.flow_from_directory(
     color_mode="grayscale",
     batch_size=BATCH_SIZE,
     class_mode="categorical",
-    subset="training",
     shuffle=True,
     seed=SEED
 )
 
-validation_generator = train_datagen.flow_from_directory(
-    TRAIN_DIR,
+validation_generator = validation_datagen.flow_from_directory(
+    VALIDATION_DIR,
     target_size=(IMG_SIZE, IMG_SIZE),
     color_mode="grayscale",
     batch_size=BATCH_SIZE,
     class_mode="categorical",
-    subset="validation",
-    shuffle=False,
-    seed=SEED
+    shuffle=False
 )
 
 test_generator = test_datagen.flow_from_directory(
@@ -79,25 +80,25 @@ model = Sequential([
     Conv2D(64, (3, 3), padding="same"),
     BatchNormalization(),
     Activation("relu"),
-    MaxPooling2D(pool_size=(2, 2)),
+    MaxPooling2D(2, 2),
     Dropout(0.25),
 
     Conv2D(128, (5, 5), padding="same"),
     BatchNormalization(),
     Activation("relu"),
-    MaxPooling2D(pool_size=(2, 2)),
+    MaxPooling2D(2, 2),
     Dropout(0.25),
 
     Conv2D(256, (3, 3), padding="same"),
     BatchNormalization(),
     Activation("relu"),
-    MaxPooling2D(pool_size=(2, 2)),
+    MaxPooling2D(2, 2),
     Dropout(0.25),
 
     Conv2D(256, (3, 3), padding="same"),
     BatchNormalization(),
     Activation("relu"),
-    MaxPooling2D(pool_size=(2, 2)),
+    MaxPooling2D(2, 2),
     Dropout(0.25),
 
     Flatten(),
@@ -124,8 +125,9 @@ model.compile(
 model.summary()
 
 early_stopping = EarlyStopping(
-    monitor="val_loss",
+    monitor="val_accuracy",
     patience=3,
+    mode="max",
     restore_best_weights=True,
     verbose=1
 )
@@ -164,4 +166,4 @@ with open("../backend/image_label_classes.pkl", "wb") as f:
 print("Training completed.")
 print("Saved:")
 print("../backend/image_emotion_model.keras")
-print("../backend/image_label_classes.pkl")+.96
+print("../backend/image_label_classes.pkl")

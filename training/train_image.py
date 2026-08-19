@@ -22,7 +22,7 @@ TEST_DIR = os.path.join(DATASET_DIR, "test")
 
 IMG_SIZE = 48
 BATCH_SIZE = 256         # larger batch = fewer Python/BLAS calls = faster on CPU
-EPOCHS = 40              # early stopping will cut this short if needed
+EPOCHS = 5            # early stopping will cut this short if needed
 SEED = 42
 L2_REG = 1e-4
 
